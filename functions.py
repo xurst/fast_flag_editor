@@ -6,7 +6,7 @@ import shutil
 from typing import Dict, Any, List
 
 AUTOSAVE_DELAY = 1000
-UPDATE_CHECK_INTERVAL = 5000  # Check for new Roblox version every 5 seconds
+UPDATE_CHECK_INTERVAL = 5000
 
 class FastFlagEditorApp:
     def __init__(self):
