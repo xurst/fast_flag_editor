@@ -53,20 +53,17 @@ class FastFlagEditorApp:
         self.load_flags()
 
     def update(self):
-        """Called every frame to handle time-based logic."""
-        # --- Autosave logic ---
+
         if self.autosave_scheduled_time > 0 and pygame.time.get_ticks() > self.autosave_scheduled_time:
             self.save_flags()
             self.autosave_scheduled_time = -1.0
 
-        # --- Roblox update check logic ---
         current_time = pygame.time.get_ticks()
         if current_time - self.last_update_check_time > UPDATE_CHECK_INTERVAL:
             self.check_for_roblox_update()
             self.last_update_check_time = current_time
 
     def check_for_roblox_update(self):
-        """Periodically checks for a new Roblox version and migrates flags if needed."""
         current_latest_path = self.get_latest_roblox_version_with_player()
 
         if current_latest_path and current_latest_path != self.known_latest_version_path:
@@ -88,13 +85,10 @@ class FastFlagEditorApp:
                 except Exception as e:
                     self.trigger_error_popup("Migration Error", f"Could not copy flags: {e}")
 
-            # Update to the new path and reload
             self.known_latest_version_path = current_latest_path
             self.load_flags()
 
-
     def draw_ui(self):
-        """Draws the entire application UI and handles popup logic."""
         viewport = imgui.get_main_viewport()
         imgui.set_next_window_position(*viewport.pos)
         imgui.set_next_window_size(*viewport.size)
@@ -217,7 +211,6 @@ class FastFlagEditorApp:
         self.autosave_scheduled_time = pygame.time.get_ticks() + AUTOSAVE_DELAY
 
     def get_latest_roblox_version_with_player(self):
-        """Find the latest Roblox version folder that contains RobloxPlayerBeta.exe."""
         try:
             versions_dir = os.path.join(os.environ["LOCALAPPDATA"], "Roblox", "Versions")
             if not os.path.exists(versions_dir):
@@ -263,9 +256,9 @@ class FastFlagEditorApp:
                     if content.strip():
                         self.flags = json.loads(content)
                         self.flags_enabled = True
-                    else: # File is empty, assume flags are disabled
+                    else: 
                         self.flags_enabled = False
-            else: # File doesn't exist, start fresh
+            else: 
                 self.flags = {}
                 self.flags_enabled = True
 
@@ -287,12 +280,12 @@ class FastFlagEditorApp:
             os.makedirs(dst_dir, exist_ok=True)
 
             dst_path = os.path.join(dst_dir, "ClientAppSettings.json")
-            
+
             with open(dst_path, "w") as f:
                 if self.flags_enabled:
                     json.dump(self.flags, f, indent=2)
                 else:
-                    # Write empty content to disable flags, but don't delete the file
+
                     f.write("{}")
 
         except Exception as e:
@@ -304,7 +297,7 @@ class FastFlagEditorApp:
             self.filtered_flags = sorted(self.flags.keys())
         else:
             self.filtered_flags = sorted([k for k in self.flags if search_lower in k.lower()])
-        # Deselect flags after filtering to avoid confusion
+
         self.selected_flags.clear()
         self.last_selected_index = -1
 
