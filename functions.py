@@ -6,6 +6,7 @@ import shutil
 from typing import Dict, Any, List
 
 AUTOSAVE_DELAY = 1000
+UPDATE_CHECK_INTERVAL = 5000  # Check for new Roblox version every 5 seconds
 
 class FastFlagEditorApp:
     def __init__(self):
@@ -17,6 +18,7 @@ class FastFlagEditorApp:
         self.selected_flags: Dict[str, bool] = {}
 
         self.autosave_scheduled_time: float = -1.0
+        self.last_update_check_time: float = 0.0
 
         self.show_add_popup = False
         self.show_edit_popup = False
@@ -44,17 +46,52 @@ class FastFlagEditorApp:
 
         self.flag_type_options = ["bool", "int", "string"]
 
-        self.active_roblox_version_path = self.get_latest_roblox_version_with_player()
+        self.known_latest_version_path = self.get_latest_roblox_version_with_player()
 
-        self.auto_copy_enabled = False 
+        self.flags_enabled = True
 
         self.load_flags()
 
     def update(self):
-        """Called every frame to handle time-based logic like autosaving."""
+        """Called every frame to handle time-based logic."""
+        # --- Autosave logic ---
         if self.autosave_scheduled_time > 0 and pygame.time.get_ticks() > self.autosave_scheduled_time:
             self.save_flags()
             self.autosave_scheduled_time = -1.0
+
+        # --- Roblox update check logic ---
+        current_time = pygame.time.get_ticks()
+        if current_time - self.last_update_check_time > UPDATE_CHECK_INTERVAL:
+            self.check_for_roblox_update()
+            self.last_update_check_time = current_time
+
+    def check_for_roblox_update(self):
+        """Periodically checks for a new Roblox version and migrates flags if needed."""
+        current_latest_path = self.get_latest_roblox_version_with_player()
+
+        if current_latest_path and current_latest_path != self.known_latest_version_path:
+            old_version_path = self.known_latest_version_path
+            old_settings_path = os.path.join(old_version_path, "ClientSettings", "ClientAppSettings.json")
+
+            self.trigger_error_popup(
+                "Roblox Update Detected",
+                f"New version found!\nFrom: {os.path.basename(old_version_path)}\nTo: {os.path.basename(current_latest_path)}"
+            )
+
+            if os.path.exists(old_settings_path):
+                try:
+                    new_settings_dir = os.path.join(current_latest_path, "ClientSettings")
+                    os.makedirs(new_settings_dir, exist_ok=True)
+                    new_settings_path = os.path.join(new_settings_dir, "ClientAppSettings.json")
+                    shutil.copy2(old_settings_path, new_settings_path)
+                    print(f"Successfully copied flags from {old_version_path} to {current_latest_path}")
+                except Exception as e:
+                    self.trigger_error_popup("Migration Error", f"Could not copy flags: {e}")
+
+            # Update to the new path and reload
+            self.known_latest_version_path = current_latest_path
+            self.load_flags()
+
 
     def draw_ui(self):
         """Draws the entire application UI and handles popup logic."""
@@ -71,6 +108,11 @@ class FastFlagEditorApp:
             button_spacing = imgui.get_style().item_spacing.x
             button_width = (available_width - (button_spacing * (button_count - 1))) / button_count
 
+            toggle_label = "Disable Flags" if self.flags_enabled else "Enable Flags"
+            if imgui.button(toggle_label):
+                self.flags_enabled = not self.flags_enabled
+                self.schedule_autosave()
+            imgui.separator()
             if imgui.button("Add Flag", width=button_width): self.trigger_add_popup()
             imgui.same_line()
             if imgui.button("Remove Selected", width=button_width): self.trigger_remove_popup()
@@ -202,51 +244,30 @@ class FastFlagEditorApp:
         except Exception:
             return None
 
-    def copy_to_roblox_version(self):
-        """Copy the settings file to the active Roblox version folder."""
-        try:
-            if not os.path.exists(self.settings_path):
-                self.trigger_error_popup("Copy Error", "No settings file found to copy.")
-                return False
-
-            latest_version = self.get_latest_roblox_version()
-            if not latest_version:
-                self.trigger_error_popup("Copy Error", "Could not find Roblox version folder.")
-                return False
-
-            dst_dir = os.path.join(latest_version, "ClientSettings")
-            os.makedirs(dst_dir, exist_ok=True)
-
-            dst_path = os.path.join(dst_dir, "ClientAppSettings.json")
-            shutil.copy2(self.settings_path, dst_path)
-
-            self.last_version_folder = latest_version
-            self.trigger_error_popup("Copy Success", f"Settings copied to:\n{dst_path}")
-            return True
-
-        except Exception as e:
-            self.trigger_error_popup("Copy Error", f"Failed to copy settings: {e}")
-            return False
-
     def load_flags(self):
-
-        if not self.active_roblox_version_path:
+        if not self.known_latest_version_path:
             self.flags = {}
             self.flag_types = {}
             self.filter_flags()
             self.trigger_error_popup("Load Error", "Could not find Roblox version folder. Starting with no flags.")
             return
 
-        settings_file_in_roblox_version = os.path.join(
-            self.active_roblox_version_path, "ClientSettings", "ClientAppSettings.json"
+        settings_file_path = os.path.join(
+            self.known_latest_version_path, "ClientSettings", "ClientAppSettings.json"
         )
 
         try:
-            if os.path.exists(settings_file_in_roblox_version):
-                with open(settings_file_in_roblox_version, "r") as f:
-                    self.flags = json.load(f)
-            else:
-                self.flags = {} 
+            if os.path.exists(settings_file_path):
+                with open(settings_file_path, "r") as f:
+                    content = f.read()
+                    if content.strip():
+                        self.flags = json.loads(content)
+                        self.flags_enabled = True
+                    else: # File is empty, assume flags are disabled
+                        self.flags_enabled = False
+            else: # File doesn't exist, start fresh
+                self.flags = {}
+                self.flags_enabled = True
 
             self.flag_types = {}
             for key, value in self.flags.items():
@@ -257,25 +278,22 @@ class FastFlagEditorApp:
             self.trigger_error_popup("Error Loading Flags", f"Failed to load flags: {e}")
 
     def save_flags(self):
-
-        if not self.active_roblox_version_path:
+        if not self.known_latest_version_path:
             self.trigger_error_popup("Save Error", "Could not find Roblox version folder. Cannot save.")
             return
 
         try:
-
-            dst_dir = os.path.join(self.active_roblox_version_path, "ClientSettings")
+            dst_dir = os.path.join(self.known_latest_version_path, "ClientSettings")
             os.makedirs(dst_dir, exist_ok=True)
 
             dst_path = os.path.join(dst_dir, "ClientAppSettings.json")
-
-            temp_file_path = os.path.join(dst_dir, "ClientAppSettings.json.tmp")
-            with open(temp_file_path, "w") as f:
-                json.dump(self.flags, f, indent=2)
-
-            shutil.move(temp_file_path, dst_path)
-
-            self.trigger_error_popup("Save Success", f"Flags saved to:\n{dst_path}")
+            
+            with open(dst_path, "w") as f:
+                if self.flags_enabled:
+                    json.dump(self.flags, f, indent=2)
+                else:
+                    # Write empty content to disable flags, but don't delete the file
+                    f.write("{}")
 
         except Exception as e:
             self.trigger_error_popup("Error Saving Flags", f"Failed to save flags: {e}")
@@ -286,7 +304,9 @@ class FastFlagEditorApp:
             self.filtered_flags = sorted(self.flags.keys())
         else:
             self.filtered_flags = sorted([k for k in self.flags if search_lower in k.lower()])
+        # Deselect flags after filtering to avoid confusion
         self.selected_flags.clear()
+        self.last_selected_index = -1
 
     def _deduce_type(self, value: Any) -> str:
         if isinstance(value, bool): return "bool"
